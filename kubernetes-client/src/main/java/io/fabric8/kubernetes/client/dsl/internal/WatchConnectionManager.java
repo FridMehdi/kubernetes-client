@@ -15,16 +15,18 @@
  */
 package io.fabric8.kubernetes.client.dsl.internal;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.KubernetesResourceList;
+import io.fabric8.kubernetes.api.model.ListOptions;
 import io.fabric8.kubernetes.api.model.Status;
 import io.fabric8.kubernetes.api.model.WatchEvent;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
+import io.fabric8.kubernetes.client.Watcher.Action;
 import io.fabric8.kubernetes.client.dsl.base.BaseOperation;
 import io.fabric8.kubernetes.client.dsl.base.OperationSupport;
+import io.fabric8.kubernetes.client.utils.HttpClientUtils;
 import io.fabric8.kubernetes.client.utils.Utils;
 import okhttp3.*;
 import okio.ByteString;
@@ -49,9 +51,9 @@ public class WatchConnectionManager<T extends HasMetadata, L extends KubernetesR
 
   private static final Logger logger = LoggerFactory.getLogger(WatchConnectionManager.class);
 
-  private static final ObjectMapper mapper = new ObjectMapper();
   private final AtomicBoolean forceClosed = new AtomicBoolean();
   private final AtomicReference<String> resourceVersion;
+  private final ListOptions listOptions;
   private final BaseOperation<T, L, ?, ?> baseOperation;
   private final Watcher<T> watcher;
   private final int reconnectLimit;
@@ -72,8 +74,9 @@ public class WatchConnectionManager<T extends HasMetadata, L extends KubernetesR
   private WebSocket webSocket;
   private OkHttpClient clonedClient;
 
-  public WatchConnectionManager(final OkHttpClient client, final BaseOperation<T, L, ?, ?> baseOperation, final String version, final Watcher<T> watcher, final int reconnectInterval, final int reconnectLimit, long websocketTimeout, int maxIntervalExponent) throws MalformedURLException {
-    this.resourceVersion = new AtomicReference<>(version); // may be a reference to null
+  public WatchConnectionManager(final OkHttpClient client, final BaseOperation<T, L, ?, ?> baseOperation, final ListOptions listOptions, final Watcher<T> watcher, final int reconnectInterval, final int reconnectLimit, long websocketTimeout, int maxIntervalExponent) throws MalformedURLException {
+    this.listOptions = listOptions;
+    this.resourceVersion = new AtomicReference<>(listOptions.getResourceVersion());
     this.baseOperation = baseOperation;
     this.watcher = watcher;
     this.reconnectInterval = reconnectInterval;
@@ -82,7 +85,6 @@ public class WatchConnectionManager<T extends HasMetadata, L extends KubernetesR
     this.maxIntervalExponent = maxIntervalExponent;
 
     this.clonedClient = client.newBuilder()
-      .pingInterval(30, TimeUnit.SECONDS)
       .readTimeout(this.websocketTimeout, TimeUnit.MILLISECONDS)
       .build();
 
@@ -100,9 +102,9 @@ public class WatchConnectionManager<T extends HasMetadata, L extends KubernetesR
     runWatch();
   }
 
-  public WatchConnectionManager(final OkHttpClient client, final BaseOperation<T, L, ?, ?> baseOperation, final String version, final Watcher<T> watcher, final int reconnectInterval, final int reconnectLimit, long websocketTimeout) throws MalformedURLException {
+  public WatchConnectionManager(final OkHttpClient client, final BaseOperation<T, L, ?, ?> baseOperation, final ListOptions listOptions, final Watcher<T> watcher, final int reconnectInterval, final int reconnectLimit, long websocketTimeout) throws MalformedURLException {
     // Default max 32x slowdown from base interval
-    this(client, baseOperation, version, watcher, reconnectInterval, reconnectLimit, websocketTimeout, 5);
+    this(client, baseOperation, listOptions, watcher, reconnectInterval, reconnectLimit, websocketTimeout, 5);
   }
 
   private final void runWatch() {
@@ -137,17 +139,18 @@ public class WatchConnectionManager<T extends HasMetadata, L extends KubernetesR
         httpUrlBuilder.addQueryParameter("fieldSelector", fieldQueryString);
       }
     }
+    listOptions.setResourceVersion(resourceVersion.get());
+    HttpClientUtils.appendListOptionParams(httpUrlBuilder, listOptions);
 
-    if (this.resourceVersion.get() != null) {
-      httpUrlBuilder.addQueryParameter("resourceVersion", this.resourceVersion.get());
+    String origin = requestUrl.getProtocol() + "://" + requestUrl.getHost();
+    if (requestUrl.getPort() != -1) {
+        origin += ":" + requestUrl.getPort();
     }
-
-    httpUrlBuilder.addQueryParameter("watch", "true");
 
     Request request = new Request.Builder()
       .get()
       .url(httpUrlBuilder.build())
-      .addHeader("Origin", requestUrl.getProtocol() + "://" + requestUrl.getHost() + ":" + requestUrl.getPort())
+      .addHeader("Origin", origin)
       .build();
 
     webSocket = clonedClient.newWebSocket(request, new WebSocketListener() {
@@ -249,13 +252,14 @@ public class WatchConnectionManager<T extends HasMetadata, L extends KubernetesR
             // The resource version no longer exists - this has to be handled by the caller.
             if (status.getCode() == HTTP_GONE) {
               webSocketRef.set(null); // lose the ref: closing in close() would only generate a Broken pipe
-                                      // exception
+              // exception
               // shut down executor, etc.
               closeEvent(new KubernetesClientException(status));
               close();
               return;
             }
 
+            watcher.eventReceived(Action.ERROR, null);
             logger.error("Error received: {}", status.toString());
           } else {
             logger.error("Unknown message received: {}", message);

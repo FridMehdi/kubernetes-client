@@ -18,10 +18,12 @@ package io.fabric8.kubernetes.client.server.mock;
 
 import io.fabric8.kubernetes.client.Config;
 import io.fabric8.kubernetes.client.ConfigBuilder;
-import org.junit.Assert;
-import org.junit.Test;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.util.Locale;
 
 import static okhttp3.TlsVersion.TLS_1_0;
 
@@ -39,7 +41,7 @@ public class MasterProtocolTest {
                 .withTlsVersions(TLS_1_0)
                 .withTrustCerts(true)
                 .build();
-        Assert.assertTrue(config.getMasterUrl().toLowerCase().startsWith(Config.HTTPS_PROTOCOL_PREFIX));
+        assertTrue(config.getMasterUrl().toLowerCase(Locale.ROOT).startsWith(Config.HTTPS_PROTOCOL_PREFIX));
 
         sslServer.destroy();
     }
@@ -53,7 +55,7 @@ public class MasterProtocolTest {
         Config config = new ConfigBuilder()
                 .withMasterUrl(host + ":" +port)
                 .build();
-        Assert.assertTrue(config.getMasterUrl().toLowerCase().startsWith(Config.HTTP_PROTOCOL_PREFIX));
+        assertTrue(config.getMasterUrl().toLowerCase(Locale.ROOT).startsWith(Config.HTTP_PROTOCOL_PREFIX));
         plainServer.destroy();
     }
 }

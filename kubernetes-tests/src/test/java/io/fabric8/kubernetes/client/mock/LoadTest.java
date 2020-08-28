@@ -17,16 +17,19 @@
 package io.fabric8.kubernetes.client.mock;
 
 import io.fabric8.kubernetes.api.model.HasMetadata;
+import io.fabric8.kubernetes.api.model.networking.NetworkPolicy;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesServer;
 import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.migrationsupport.rules.EnableRuleMigrationSupport;
 
 import java.util.List;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+@EnableRuleMigrationSupport
 public class LoadTest {
 
   @Rule
@@ -81,5 +84,17 @@ public class LoadTest {
     assertEquals("v1", deploymentResource.getApiVersion());
     assertEquals("ImageStream", deploymentResource.getKind());
     assertEquals("eap-app", deploymentResource.getMetadata().getName());
+  }
+
+  @Test
+  void testNetworkPolicyLoad() {
+    KubernetesClient client = server.getClient();
+    List<HasMetadata> itemList = client.load(getClass().getResourceAsStream("/test-networkpolicy.yml")).get();
+
+    assertEquals(1, itemList.size());
+    NetworkPolicy ingress = (NetworkPolicy) itemList.get(0);
+    assertEquals("test-network-policy", ingress.getMetadata().getName());
+    assertEquals(1, ingress.getSpec().getIngress().size());
+    assertEquals(1, ingress.getSpec().getEgress().size());
   }
 }

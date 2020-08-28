@@ -24,24 +24,27 @@ import io.fabric8.openshift.client.NamespacedOpenShiftClient;
 import io.fabric8.openshift.client.OpenShiftClient;
 
 import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.migrationsupport.rules.EnableRuleMigrationSupport;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+@EnableRuleMigrationSupport
 public class SubjectAccessReviewTest {
   @Rule
   public OpenShiftServer server = new OpenShiftServer();
 
   @Test
   public void testCreate() {
-   server.expect().withPath("/oapi/v1/subjectaccessreviews").andReturn(201, new SubjectAccessReviewResponseBuilder()
+    server.expect().withPath("/apis/authorization.openshift.io/v1/subjectaccessreviews").andReturn(201, new SubjectAccessReviewResponseBuilder()
       .withReason("r1")
       .build()).once();
 
     NamespacedOpenShiftClient client = server.getOpenshiftClient();
 
-    SubjectAccessReviewResponse response = client.inAnyNamespace().subjectAccessReviews().create(new SubjectAccessReviewBuilder().build());
+    SubjectAccessReviewResponse response = client.inAnyNamespace().subjectAccessReviews().create(new SubjectAccessReviewBuilder()
+      .build());
     assertNotNull(response);
     assertEquals("r1", response.getReason());
   }
@@ -49,13 +52,14 @@ public class SubjectAccessReviewTest {
 
   @Test
   public void testCreateInLine() {
-   server.expect().withPath("/oapi/v1/subjectaccessreviews").andReturn(201, new SubjectAccessReviewResponseBuilder()
+    server.expect().withPath("/apis/authorization.openshift.io/v1/subjectaccessreviews").andReturn(201, new SubjectAccessReviewResponseBuilder()
       .withReason("r2")
       .build()).once();
 
     NamespacedOpenShiftClient client = server.getOpenshiftClient();
 
-    SubjectAccessReviewResponse response = client.inAnyNamespace().subjectAccessReviews().createNew().withUser("user").withVerb("verb").done();
+    SubjectAccessReviewResponse response = client.inAnyNamespace().subjectAccessReviews()
+      .create(new SubjectAccessReviewBuilder().build());
     assertNotNull(response);
     assertEquals("r2", response.getReason());
   }
@@ -63,13 +67,17 @@ public class SubjectAccessReviewTest {
 
   @Test
   public void testCreateLocal() {
-   server.expect().withPath("/oapi/v1/namespaces/test/subjectaccessreviews").andReturn(201, new SubjectAccessReviewResponseBuilder()
+   server.expect().withPath("/apis/authorization.openshift.io/v1/namespaces/test/localsubjectaccessreviews").andReturn(201, new SubjectAccessReviewResponseBuilder()
       .withReason("r1")
       .build()).once();
 
     OpenShiftClient client = server.getOpenshiftClient();
 
-    SubjectAccessReviewResponse response = client.subjectAccessReviews().inNamespace("test").create(new LocalSubjectAccessReviewBuilder().build());
+    SubjectAccessReviewResponse response = client.localSubjectAccessReviews().inNamespace("test").create(new LocalSubjectAccessReviewBuilder()
+      .withNamespace("test")
+      .withVerb("get")
+      .withGroups("test.fabric8.io")
+      .build());
     assertNotNull(response);
     assertEquals("r1", response.getReason());
   }
@@ -77,13 +85,16 @@ public class SubjectAccessReviewTest {
 
   @Test
   public void testCreateLocalInLine() {
-   server.expect().withPath("/oapi/v1/namespaces/test/subjectaccessreviews").andReturn( 201, new SubjectAccessReviewResponseBuilder()
+   server.expect().withPath("/apis/authorization.openshift.io/v1/namespaces/test/localsubjectaccessreviews").andReturn( 201, new SubjectAccessReviewResponseBuilder()
       .withReason("r2")
       .build()).once();
 
     OpenShiftClient client = server.getOpenshiftClient();
 
-    SubjectAccessReviewResponse response = client.subjectAccessReviews().inNamespace("test").createNew().withUser("user").withVerb("verb").done();
+    SubjectAccessReviewResponse response = client.localSubjectAccessReviews().inNamespace("test").create(new LocalSubjectAccessReviewBuilder()
+      .withUser("user")
+      .withVerb("verb")
+      .build());
     assertNotNull(response);
     assertEquals("r2", response.getReason());
   }

@@ -16,6 +16,7 @@
 
 package io.fabric8.openshift.client.server.mock;
 
+import io.fabric8.kubernetes.api.model.APIGroupListBuilder;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.openshift.api.model.Build;
 import io.fabric8.openshift.api.model.BuildBuilder;
@@ -26,36 +27,51 @@ import io.fabric8.openshift.api.model.BuildConfigListBuilder;
 import io.fabric8.openshift.api.model.BuildListBuilder;
 import io.fabric8.openshift.client.OpenShiftClient;
 
-import org.junit.Ignore;
+import org.junit.jupiter.api.Disabled;
 import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.migrationsupport.rules.EnableRuleMigrationSupport;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
 import java.net.SocketTimeoutException;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
+@EnableRuleMigrationSupport
 public class BuildConfigTest {
   @Rule
   public OpenShiftServer server = new OpenShiftServer();
 
   @Test
   public void testList() {
-   server.expect().withPath("/oapi/v1/namespaces/test/buildconfigs").andReturn(200, new BuildConfigListBuilder().build()).once();
-   server.expect().withPath("/oapi/v1/namespaces/ns1/buildconfigs").andReturn(200, new BuildConfigListBuilder()
+   server.expect().withPath("/apis/build.openshift.io/v1/namespaces/test/buildconfigs").andReturn(200, new BuildConfigListBuilder().build()).once();
+
+   server.expect().withPath("/apis").andReturn(200, new APIGroupListBuilder()
+      .addNewGroup()
+      .withApiVersion("v1")
+      .withName("autoscaling.k8s.io")
+      .endGroup()
+      .addNewGroup()
+      .withApiVersion("v1")
+      .withName("security.openshift.io")
+      .endGroup()
+      .build()).always();
+
+   server.expect().withPath("/apis/build.openshift.io/v1/namespaces/ns1/buildconfigs").andReturn(200, new BuildConfigListBuilder()
       .addNewItem().and()
       .addNewItem().and().build()).once();
 
-   server.expect().withPath("/oapi/v1/buildconfigs").andReturn(200, new BuildConfigListBuilder()
+   server.expect().withPath("/apis/build.openshift.io/v1/buildconfigs").andReturn(200, new BuildConfigListBuilder()
       .addNewItem().and()
       .addNewItem().and()
       .addNewItem()
@@ -79,11 +95,11 @@ public class BuildConfigTest {
 
   @Test
   public void testGet() {
-   server.expect().withPath("/oapi/v1/namespaces/test/buildconfigs/bc1").andReturn(200, new BuildConfigBuilder()
+   server.expect().withPath("/apis/build.openshift.io/v1/namespaces/test/buildconfigs/bc1").andReturn(200, new BuildConfigBuilder()
       .withNewMetadata().withName("bc1").endMetadata()
       .build()).once();
 
-   server.expect().withPath("/oapi/v1/namespaces/ns1/buildconfigs/bc2").andReturn(200, new BuildConfigBuilder()
+   server.expect().withPath("/apis/build.openshift.io/v1/namespaces/ns1/buildconfigs/bc2").andReturn(200, new BuildConfigBuilder()
       .withNewMetadata().withName("bc2").endMetadata()
       .build()).once();
 
@@ -102,9 +118,9 @@ public class BuildConfigTest {
   }
 
   @Test
-  @Ignore //Seems that in this version of mockwebserver, posting using an inputstream doesn't work that well, so we'll have to ignore.
+  @Disabled //Seems that in this version of mockwebserver, posting using an inputstream doesn't work that well, so we'll have to ignore.
   public void testBinaryBuildFromInputStream() {
-   server.expect().post().withPath("/oapi/v1/namespaces/ns1/buildconfigs/bc2/instantiatebinary?commit=some%20commit&revision.authorName=author%20name&revision.authorEmail=author@someorg.com&revision.committerName=committer%20name&revision.committerEmail=committer@someorg.com")
+   server.expect().post().withPath("/apis/build.openshift.io/v1/namespaces/ns1/buildconfigs/bc2/instantiatebinary?commit=some%20commit&revision.authorName=author%20name&revision.authorEmail=author@someorg.com&revision.committerName=committer%20name&revision.committerEmail=committer@someorg.com")
       .andReturn(201, new BuildBuilder()
       .withNewMetadata().withName("bc2").endMetadata().build()).once();
 
@@ -128,7 +144,7 @@ public class BuildConfigTest {
     File warFile = new File("target/test.war");
     warFile.createNewFile();
 
-    server.expect().post().withPath("/oapi/v1/namespaces/ns1/buildconfigs/bc2/instantiatebinary?commit=&asFile=" + warFile.getName())
+    server.expect().post().withPath("/apis/build.openshift.io/v1/namespaces/ns1/buildconfigs/bc2/instantiatebinary?name=bc2&namespace=ns1&asFile=" + warFile.getName())
       .andReturn(201, new BuildBuilder()
       .withNewMetadata().withName("bc2").endMetadata().build()).once();
 
@@ -140,12 +156,14 @@ public class BuildConfigTest {
       .instantiateBinary()
       .asFile(warFile.getName())
       .fromFile(warFile);
+    assertNotNull(build);
+    assertEquals("bc2", build.getMetadata().getName());
   }
 
   // TODO Add delay to mockwebserver. Disabled as too dependent on timing issues right now.
   //@Test
   public void testBinaryBuildWithTimeout() {
-   server.expect().post().delay(200).withPath("/oapi/v1/namespaces/ns1/buildconfigs/bc2/instantiatebinary?commit=")
+   server.expect().post().delay(200).withPath("/apis/build.openshift.io/v1/namespaces/ns1/buildconfigs/bc2/instantiatebinary?commit=")
       .andReturn(201, new BuildBuilder()
       .withNewMetadata().withName("bc2").endMetadata().build()).once();
 
@@ -166,10 +184,10 @@ public class BuildConfigTest {
 
   @Test
   public void testDelete() {
-   server.expect().withPath("/oapi/v1/namespaces/test/buildconfigs/bc1").andReturn(200, new BuildConfigBuilder().withNewMetadata().withName("bc1").and().build()).once();
-   server.expect().withPath("/oapi/v1/namespaces/test/builds?labelSelector=openshift.io%2Fbuild-config.name%3Dbc1").andReturn( 200, new BuildListBuilder().build()).once();
-   server.expect().withPath("/oapi/v1/namespaces/ns1/buildconfigs/bc2").andReturn( 200, new BuildConfigBuilder().withNewMetadata().withName("bc2").and().build()).once();
-   server.expect().withPath("/oapi/v1/namespaces/ns1/builds?labelSelector=openshift.io%2Fbuild-config.name%3Dbc2").andReturn( 200, new BuildListBuilder().build()).once();
+   server.expect().withPath("/apis/build.openshift.io/v1/namespaces/test/buildconfigs/bc1").andReturn(200, new BuildConfigBuilder().withNewMetadata().withName("bc1").and().build()).once();
+   server.expect().withPath("/apis/build.openshift.io/v1/namespaces/test/builds?labelSelector=openshift.io%2Fbuild-config.name%3Dbc1").andReturn( 200, new BuildListBuilder().build()).once();
+   server.expect().withPath("/apis/build.openshift.io/v1/namespaces/ns1/buildconfigs/bc2").andReturn( 200, new BuildConfigBuilder().withNewMetadata().withName("bc2").and().build()).once();
+   server.expect().withPath("/apis/build.openshift.io/v1/namespaces/ns1/builds?labelSelector=openshift.io%2Fbuild-config.name%3Dbc2").andReturn( 200, new BuildListBuilder().build()).once();
 
     OpenShiftClient client = server.getOpenshiftClient();
 
@@ -181,6 +199,50 @@ public class BuildConfigTest {
 
     deleted = client.buildConfigs().inNamespace("ns1").withName("bc2").delete();
     assertTrue(deleted);
+  }
+
+  @Test
+  void testCreateOrReplaceOpenShift3() {
+    // Given
+    BuildConfig buildConfig = getBuildConfig();
+    server.expect().post().withPath("/oapi/v1/namespaces/ns1/buildconfigs")
+      .andReturn(HttpURLConnection.HTTP_OK, buildConfig)
+      .once();
+    OpenShiftClient client = server.getOpenshiftClient();
+
+    // When
+    buildConfig = client.buildConfigs().inNamespace("ns1").createOrReplace(buildConfig);
+
+    // Then
+    assertNotNull(buildConfig);
+    assertEquals("ruby-sample-build", buildConfig.getMetadata().getName());
+  }
+
+  private BuildConfig getBuildConfig() {
+    return new BuildConfigBuilder()
+      .withNewMetadata().withName("ruby-sample-build").endMetadata()
+      .withNewSpec()
+      .withRunPolicy("Serial")
+      .addNewTrigger().withType("GitHub").withNewGithub().withSecret("secret101").endGithub().endTrigger()
+      .addNewTrigger().withType("Generic").withNewGeneric().withSecret("secret101").endGeneric().endTrigger()
+      .addNewTrigger().withType("ImageChange").endTrigger()
+      .withNewSource()
+      .withNewGit().withUri("https://github.com/openshift/ruby-hello-world").endGit()
+      .endSource()
+      .withNewStrategy()
+      .withNewSourceStrategy()
+      .withNewFrom()
+      .withKind("ImageStreamTag")
+      .withName("ruby-20-centos7:latest")
+      .endFrom()
+      .endSourceStrategy()
+      .endStrategy()
+      .withNewOutput()
+      .withNewTo().withKind("ImageStreamTag").withName("origin-ruby-sample:latest").endTo()
+      .endOutput()
+      .withNewPostCommit().withScript("bundle exec rake test").endPostCommit()
+      .endSpec()
+      .build();
   }
 
 }

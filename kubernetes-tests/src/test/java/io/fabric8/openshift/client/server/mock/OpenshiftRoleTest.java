@@ -16,31 +16,44 @@
 
 package io.fabric8.openshift.client.server.mock;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
+import io.fabric8.kubernetes.api.model.APIGroupListBuilder;
 import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.migrationsupport.rules.EnableRuleMigrationSupport;
 
-import io.fabric8.openshift.api.model.OpenshiftRole;
-import io.fabric8.openshift.api.model.OpenshiftRoleBuilder;
-import io.fabric8.openshift.api.model.OpenshiftRoleList;
-import io.fabric8.openshift.api.model.OpenshiftRoleListBuilder;
+import io.fabric8.openshift.api.model.Role;
+import io.fabric8.openshift.api.model.RoleBuilder;
+import io.fabric8.openshift.api.model.RoleList;
+import io.fabric8.openshift.api.model.RoleListBuilder;
 import io.fabric8.openshift.client.OpenShiftClient;
 
+@EnableRuleMigrationSupport
 public class OpenshiftRoleTest {
   @Rule
   public OpenShiftServer server = new OpenShiftServer();
 
   @Test
   public void testList() {
-   server.expect().withPath("/oapi/v1/namespaces/test/roles").andReturn(200, new OpenshiftRoleListBuilder().build()).once();
-   server.expect().withPath("/oapi/v1/namespaces/ns1/roles").andReturn(200, new OpenshiftRoleListBuilder()
+   server.expect().withPath("/apis/authorization.openshift.io/v1/namespaces/test/roles").andReturn(200, new RoleListBuilder().build()).once();
+   server.expect().withPath("/apis/authorization.openshift.io/v1/namespaces/ns1/roles").andReturn(200, new RoleListBuilder()
       .addNewItem().and()
       .addNewItem().and().build()).once();
+   server.expect().withPath("/apis").andReturn(200, new APIGroupListBuilder()
+      .addNewGroup()
+      .withApiVersion("v1")
+      .withName("autoscaling.k8s.io")
+      .endGroup()
+      .addNewGroup()
+      .withApiVersion("v1")
+      .withName("security.openshift.io")
+      .endGroup()
+      .build()).always();
 
-   server.expect().withPath("/oapi/v1/roles").andReturn(200, new OpenshiftRoleListBuilder()
+   server.expect().withPath("/apis/authorization.openshift.io/v1/roles").andReturn(200, new RoleListBuilder()
       .addNewItem().and()
       .addNewItem().and()
       .addNewItem()
@@ -48,7 +61,7 @@ public class OpenshiftRoleTest {
 
     OpenShiftClient client = server.getOpenshiftClient();
 
-    OpenshiftRoleList roleList = client.roles().list();
+    RoleList roleList = client.roles().list();
     assertNotNull(roleList);
     assertEquals(0, roleList.getItems().size());
 
@@ -63,17 +76,17 @@ public class OpenshiftRoleTest {
 
   @Test
   public void testGet() {
-   server.expect().withPath("/oapi/v1/namespaces/test/roles/role1").andReturn(200, new OpenshiftRoleBuilder()
+   server.expect().withPath("/apis/authorization.openshift.io/v1/namespaces/test/roles/role1").andReturn(200, new RoleBuilder()
       .withNewMetadata().withName("role1").endMetadata()
       .build()).once();
 
-   server.expect().withPath("/oapi/v1/namespaces/ns1/roles/role2").andReturn(200, new OpenshiftRoleBuilder()
+   server.expect().withPath("/apis/authorization.openshift.io/v1/namespaces/ns1/roles/role2").andReturn(200, new RoleBuilder()
       .withNewMetadata().withName("role2").endMetadata()
       .build()).once();
 
     OpenShiftClient client = server.getOpenshiftClient();
 
-    OpenshiftRole role = client.roles().withName("role1").get();
+    Role role = client.roles().withName("role1").get();
     assertNotNull(role);
     assertEquals("role1", role.getMetadata().getName());
 

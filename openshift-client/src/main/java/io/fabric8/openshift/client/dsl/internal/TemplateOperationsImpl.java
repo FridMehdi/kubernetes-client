@@ -54,7 +54,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.concurrent.ExecutionException;
 
 import static io.fabric8.openshift.client.OpenShiftAPIGroups.TEMPLATE;
@@ -194,7 +193,6 @@ public class TemplateOperationsImpl
         for (int i = 0; i < 5; i++) {
           for (Parameter parameter : parameters) {
             String parameterName = parameter.getName();
-            String regex = "${" + parameterName + "}";
             String parameterValue;
             if (valuesMap.containsKey(parameterName)) {
               parameterValue = valuesMap.get(parameterName);
@@ -212,7 +210,7 @@ public class TemplateOperationsImpl
               logger.debug("Parameter {} has a null value", parameterName);
               parameterValue = "";
             }
-            json = json.replace(regex, parameterValue);
+            json = Utils.interpolateString(json, Collections.singletonMap(parameterName, parameterValue));
           }
         }
       }
@@ -246,7 +244,7 @@ public class TemplateOperationsImpl
       template = new TemplateBuilder()
         .withNewMetadata()
           .withName(generatedName)
-          .withNamespace(h != null && h.getMetadata() != null ? h.getMetadata().getNamespace() : null)
+          .withNamespace(h.getMetadata() != null ? h.getMetadata().getNamespace() : null)
         .endMetadata()
         .withObjects(h).build();
     } else if (item instanceof KubernetesResourceList) {

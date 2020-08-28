@@ -16,15 +16,8 @@
 
 package io.fabric8.kubernetes.client.mock;
 
-import io.fabric8.kubernetes.client.utils.Utils;
-import org.assertj.core.util.Files;
-import org.junit.Assert;
-import org.junit.Rule;
-import org.junit.Test;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
@@ -32,16 +25,19 @@ import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.WritableByteChannel;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import io.fabric8.kubernetes.api.model.DeletionPropagation;
+import io.fabric8.kubernetes.api.model.DoneablePod;
+import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodList;
 import io.fabric8.kubernetes.api.model.PodListBuilder;
 import io.fabric8.kubernetes.api.model.WatchEvent;
-import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.LocalPortForward;
@@ -50,24 +46,45 @@ import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.dsl.ExecListener;
 import io.fabric8.kubernetes.client.dsl.ExecWatch;
-
+import io.fabric8.kubernetes.client.dsl.PodResource;
+import io.fabric8.kubernetes.client.dsl.internal.core.v1.PodOperationsImpl;
 import io.fabric8.kubernetes.client.server.mock.KubernetesServer;
 import io.fabric8.kubernetes.client.server.mock.OutputStreamMessage;
-
+import io.fabric8.kubernetes.client.utils.Utils;
 import okhttp3.Response;
 import okio.ByteString;
+import org.junit.Assert;
+import org.junit.Rule;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.migrationsupport.rules.EnableRuleMigrationSupport;
+import org.junit.rules.TemporaryFolder;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
-public class PodTest {
+@EnableRuleMigrationSupport
+class PodTest {
+
   @Rule
   public KubernetesServer server = new KubernetesServer();
+  @Rule
+  public TemporaryFolder temporaryFolder = new TemporaryFolder();
+
+  private KubernetesClient client;
+
+  @BeforeEach
+  void setUp() {
+    client = server.getClient().inNamespace("test");
+  }
 
   @Test
-  public void testList() {
+  void testList() {
    server.expect().withPath("/api/v1/namespaces/test/pods").andReturn(200, new PodListBuilder().build()).once();
    server.expect().withPath("/api/v1/namespaces/ns1/pods").andReturn(200, new PodListBuilder()
       .addNewItem().and()
@@ -79,8 +96,6 @@ public class PodTest {
       .addNewItem()
       .and().build()).once();
 
-
-    KubernetesClient client = server.getClient();
     PodList podList = client.pods().list();
     assertNotNull(podList);
     assertEquals(0, podList.getItems().size());
@@ -95,7 +110,7 @@ public class PodTest {
   }
 
   @Test
-  public void testListWithLables() {
+  void testListWithLabels() {
    server.expect().withPath("/api/v1/namespaces/test/pods?labelSelector=" + Utils.toUrlEncoded("key1=value1,key2=value2,key3=value3")).andReturn(200, new PodListBuilder().build()).always();
    server.expect().withPath("/api/v1/namespaces/test/pods?labelSelector=" + Utils.toUrlEncoded("key1=value1,key2=value2")).andReturn(200, new PodListBuilder()
       .addNewItem().and()
@@ -103,7 +118,6 @@ public class PodTest {
       .addNewItem().and()
       .build()).once();
 
-    KubernetesClient client = server.getClient();
     PodList podList = client.pods()
       .withLabel("key1", "value1")
       .withLabel("key2","value2")
@@ -123,24 +137,43 @@ public class PodTest {
     assertEquals(3, podList.getItems().size());
   }
 
+  @Test
+  void testListWithFields() {
+   server.expect().withPath("/api/v1/namespaces/test/pods?fieldSelector=" + Utils.toUrlEncoded("key1=value1,key2=value2,key3!=value3,key3!=value4")).andReturn(200, new PodListBuilder()
+      .addNewItem().and()
+      .addNewItem().and()
+      .build()).once();
 
-  @Test(expected = KubernetesClientException.class)
-  public void testEditMissing() {
-    server.expect().withPath("/api/v1/namespaces/test/pods/pod1").andReturn(404, "error message from kubernetes").always();
-    KubernetesClient client = server.getClient();
+    PodList podList = client.pods()
+      .withField("key1", "value1")
+      .withField("key2","value2")
+      .withoutField("key3","value3")
+      .withoutField("key3", "value4")
+      .list();
 
-    client.pods().withName("pod1").edit();
+    assertNotNull(podList);
+    assertEquals(2, podList.getItems().size());
+  }
+
+
+  @Test
+  void testEditMissing() {
+    Assertions.assertThrows(KubernetesClientException.class, () -> {
+      server.expect().withPath("/api/v1/namespaces/test/pods/pod1").andReturn(404, "error message from kubernetes").always();
+      KubernetesClient client = server.getClient();
+
+      client.pods().withName("pod1").edit();
+    });
   }
 
   @Test
-  public void testDelete() {
+  void testDelete() {
    server.expect().withPath("/api/v1/namespaces/test/pods/pod1").andReturn(200, new PodBuilder().build()).once();
    server.expect().withPath("/api/v1/namespaces/ns1/pods/pod2").andReturn(200, new PodBuilder().build()).once();
 
-    KubernetesClient client = server.getClient();
 
     Boolean deleted = client.pods().withName("pod1").delete();
-    assertNotNull(deleted);
+    assertTrue(deleted);
 
     deleted = client.pods().withName("pod2").delete();
     assertFalse(deleted);
@@ -149,9 +182,8 @@ public class PodTest {
     assertTrue(deleted);
   }
 
-
   @Test
-  public void testDeleteMulti() {
+  void testDeleteMulti() {
     Pod pod1 = new PodBuilder().withNewMetadata().withName("pod1").withNamespace("test").and().build();
     Pod pod2 = new PodBuilder().withNewMetadata().withName("pod2").withNamespace("ns1").and().build();
     Pod pod3 = new PodBuilder().withNewMetadata().withName("pod3").withNamespace("any").and().build();
@@ -159,36 +191,75 @@ public class PodTest {
    server.expect().withPath("/api/v1/namespaces/test/pods/pod1").andReturn(200, pod1).once();
    server.expect().withPath("/api/v1/namespaces/ns1/pods/pod2").andReturn(200, pod2).once();
 
-    KubernetesClient client = server.getClient();
-
     Boolean deleted = client.pods().inAnyNamespace().delete(pod1, pod2);
-    assertNotNull(deleted);
+    assertTrue(deleted);
 
     deleted = client.pods().inAnyNamespace().delete(pod3);
     assertFalse(deleted);
   }
 
-  @Test(expected = KubernetesClientException.class)
-  public void testDeleteWithNamespaceMismatch() {
-    Pod pod1 = new PodBuilder().withNewMetadata().withName("pod1").withNamespace("test").and().build();
-    Pod pod2 = new PodBuilder().withNewMetadata().withName("pod2").withNamespace("ns1").and().build();
-    KubernetesClient client = server.getClient();
+  @Test
+  void testDeleteWithNamespaceMismatch() {
+    Assertions.assertThrows(KubernetesClientException.class, () -> {
+      Pod pod1 = new PodBuilder().withNewMetadata().withName("pod1").withNamespace("test").and().build();
+      Pod pod2 = new PodBuilder().withNewMetadata().withName("pod2").withNamespace("ns1").and().build();
 
-    Boolean deleted = client.pods().inNamespace("test1").delete(pod1);
-    assertFalse(deleted);
-  }
-
-  @Test(expected = KubernetesClientException.class)
-  public void testCreateWithNameMismatch() {
-    Pod pod1 = new PodBuilder().withNewMetadata().withName("pod1").withNamespace("test").and().build();
-    Pod pod2 = new PodBuilder().withNewMetadata().withName("pod2").withNamespace("ns1").and().build();
-    KubernetesClient client = server.getClient();
-
-    client.pods().inNamespace("test1").withName("mypod1").create(pod1);
+      Boolean deleted = client.pods().inNamespace("test1").delete(pod1);
+      assertFalse(deleted);
+    });
   }
 
   @Test
-  public void testGetLog() {
+  void testDeleteWithPropagationPolicy() {
+    Pod pod1 = new PodBuilder().withNewMetadata().withName("pod1").withNamespace("test").and().build();
+    server.expect().withPath("/api/v1/namespaces/test/pods/pod1").andReturn(200, pod1).once();
+
+    Boolean deleted = client.pods().inNamespace("test").withName("pod1").withPropagationPolicy(DeletionPropagation.FOREGROUND).delete();
+    assertTrue(deleted);
+  }
+
+  @Test
+  void testEvict() {
+    server.expect().withPath("/api/v1/namespaces/test/pods/pod1/eviction").andReturn(200, new PodBuilder().build()).once();
+    server.expect().withPath("/api/v1/namespaces/ns1/pods/pod2/eviction").andReturn(200, new PodBuilder().build()).once();
+    server.expect().withPath("/api/v1/namespaces/ns1/pods/pod3/eviction").andReturn(PodOperationsImpl.HTTP_TOO_MANY_REQUESTS, new PodBuilder().build()).once();
+    server.expect().withPath("/api/v1/namespaces/ns1/pods/pod3/eviction").andReturn(200, new PodBuilder().build()).once();
+    server.expect().withPath("/api/v1/namespaces/ns1/pods/pod4/eviction").andReturn(500, new PodBuilder().build()).once();
+
+    Boolean deleted = client.pods().withName("pod1").evict();
+    assertTrue(deleted);
+
+    // not found
+    deleted = client.pods().withName("pod2").evict();
+    assertFalse(deleted);
+
+    deleted = client.pods().inNamespace("ns1").withName("pod2").evict();
+    assertTrue(deleted);
+
+    // too many requests
+    deleted = client.pods().inNamespace("ns1").withName("pod3").evict();
+    assertFalse(deleted);
+
+    deleted = client.pods().inNamespace("ns1").withName("pod3").evict();
+    assertTrue(deleted);
+
+    // unhandled error
+    PodResource<Pod, DoneablePod> resource = client.pods().inNamespace("ns1").withName("pod4");
+    assertThrows(KubernetesClientException.class, resource::evict);
+  }
+
+  @Test
+  void testCreateWithNameMismatch() {
+    Assertions.assertThrows(KubernetesClientException.class, () -> {
+      Pod pod1 = new PodBuilder().withNewMetadata().withName("pod1").withNamespace("test").and().build();
+      Pod pod2 = new PodBuilder().withNewMetadata().withName("pod2").withNamespace("ns1").and().build();
+
+      client.pods().inNamespace("test1").withName("mypod1").create(pod1);
+    });
+  }
+
+  @Test
+  void testGetLog() {
     String pod1Log = "pod1Log";
     String pod2Log = "pod2Log";
     String pod3Log = "pod3Log";
@@ -200,8 +271,6 @@ public class PodTest {
    server.expect().withPath("/api/v1/namespaces/test4/pods/pod4/log?pretty=true&container=cnt4").andReturn(200, pod4Log).once();
    server.expect().withPath("/api/v1/namespaces/test4/pods/pod1/log?pretty=false&limitBytes=100").andReturn(200, pod1Log).once();
    server.expect().withPath("/api/v1/namespaces/test5/pods/pod1/log?pretty=false&tailLines=1&timestamps=true").andReturn(200, pod1Log).once();
-
-    KubernetesClient client = server.getClient();
 
     String log = client.pods().withName("pod1").getLog(true);
     assertEquals(pod1Log, log);
@@ -223,15 +292,13 @@ public class PodTest {
   }
 
   @Test
-  public void testExec() throws InterruptedException {
+  void testExec() throws InterruptedException {
     String expectedOutput = "file1 file2";
     server.expect().withPath("/api/v1/namespaces/test/pods/pod1/exec?command=ls&stdout=true")
             .andUpgradeToWebSocket()
                 .open(new OutputStreamMessage(expectedOutput))
                 .done()
             .always();
-
-    KubernetesClient client = server.getClient();
 
     final CountDownLatch execLatch = new CountDownLatch(1);
     ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -254,61 +321,61 @@ public class PodTest {
     execLatch.await(10, TimeUnit.MINUTES);
     assertNotNull(watch);
     assertEquals(expectedOutput, baos.toString());
+    watch.close();
   }
-
 
 
   @Test
   public void testWatch() throws InterruptedException {
+    // Given
     //We start with a list
     Pod pod1 = new PodBuilder()
-            .withNewMetadata()
-            .withName("pod1")
-            .withResourceVersion("1")
-            .endMetadata()
-            .build();
-
-   server.expect().withPath("/api/v1/namespaces/test/pods").andReturn(200, new PodListBuilder()
-            .withNewMetadata()
-                .withResourceVersion("1")
-            .endMetadata()
-            .addToItems(pod1)
-            .build()
+      .withNewMetadata()
+      .withName("pod1")
+      .withResourceVersion("1")
+      .endMetadata()
+      .build();
+    server.expect().withPath("/api/v1/namespaces/test/pods").andReturn(200, new PodListBuilder()
+      .withNewMetadata()
+      .withResourceVersion("1")
+      .endMetadata()
+      .addToItems(pod1)
+      .build()
     ).once();
-
-   server.expect().withPath("/api/v1/namespaces/test/pods?fieldSelector=metadata.name%3Dpod1&watch=true")
-            .andUpgradeToWebSocket()
-            .open()
-            .waitFor(15000).andEmit(new WatchEvent(pod1, "DELETED"))
-            .done()
-            .always();
-
-    KubernetesClient client = server.getClient();
-
+    server.expect().withPath("/api/v1/namespaces/test/pods?fieldSelector=metadata.name%3Dpod1&watch=true")
+      .andUpgradeToWebSocket()
+      .open()
+      .waitFor(50).andEmit(new WatchEvent(pod1, "DELETED"))
+      .done()
+      .always();
     final CountDownLatch deleteLatch = new CountDownLatch(1);
-    Watch watch = client.pods().withName("pod1").watch(new Watcher<Pod>() {
+    final Watcher<Pod> watcher = new Watcher<Pod>() {
       @Override
       public void eventReceived(Action action, Pod resource) {
-        switch (action) {
-          case DELETED:
-            deleteLatch.countDown();
+        if (action != Action.DELETED) {
+          fail();
         }
+        deleteLatch.countDown();
       }
 
       @Override
       public void onClose(KubernetesClientException cause) {
-
       }
-    });
-
-    assertTrue(deleteLatch.await(10, TimeUnit.MINUTES));
+    };
+    // When
+    final Watch watch = client.pods().withName("pod1").watch(watcher);
+    // Then
+    assertTrue(deleteLatch.await(30, TimeUnit.SECONDS));
+    watch.close();
   }
 
 
-  @Test(expected = KubernetesClientException.class)
+  @Test
   public void testGetLogNotFound() {
-    KubernetesClient client = server.getClient();
-    client.pods().withName("pod5").getLog(true);
+    Assertions.assertThrows(KubernetesClientException.class, () -> {
+      KubernetesClient client = server.getClient();
+      client.pods().withName("pod5").getLog(true);
+    });
   }
 
   @Test
@@ -335,11 +402,9 @@ public class PodTest {
       .build();
 
 
-    Pod ready = new PodBuilder()
-      .withNewMetadata()
-      .withName("pod1")
+    Pod ready = new PodBuilder(notReady)
+      .editMetadata()
       .withResourceVersion("2")
-      .withNamespace("test")
       .endMetadata()
       .withNewStatus()
       .addNewCondition()
@@ -358,20 +423,18 @@ public class PodTest {
       .endMetadata()
       .withItems(notReady).build()).once();
 
-    server.expect().get().withPath("/api/v1/namespaces/test/pods?fieldSelector=metadata.name%3Dpod1&watch=true").andUpgradeToWebSocket()
+    server.expect().get().withPath("/api/v1/namespaces/test/pods?fieldSelector=metadata.name%3Dpod1&resourceVersion=1&watch=true").andUpgradeToWebSocket()
       .open()
-      .waitFor(1000).andEmit(new WatchEvent(ready, "MODIFIED"))
+      .waitFor(50).andEmit(new WatchEvent(ready, "MODIFIED"))
       .done()
       .always();
 
-    KubernetesClient client = server.getClient();
     Pod result = client.pods().withName("pod1").waitUntilReady(5, TimeUnit.SECONDS);
     Assert.assertEquals("2", result.getMetadata().getResourceVersion());
   }
 
   @Test
-  public void testPortForward() throws IOException {
-
+  void testPortForward() throws IOException {
     server.expect().withPath("/api/v1/namespaces/test/pods/pod1/portforward?ports=123")
       .andUpgradeToWebSocket()
       .open()
@@ -382,11 +445,11 @@ public class PodTest {
       .done()
       .once();
 
-    KubernetesClient client = server.getClient();
-
-    try(LocalPortForward portForward = client.pods().withName("pod1").portForward(123)) {
+    try(
+      LocalPortForward portForward = client.pods().withName("pod1").portForward(123);
+      SocketChannel channel = SocketChannel.open()
+    ) {
       int localPort = portForward.getLocalPort();
-      SocketChannel channel = SocketChannel.open();
       assertTrue(channel.connect(new InetSocketAddress("localhost", localPort)));
 
       ByteBuffer buffer = ByteBuffer.allocate(1024);
@@ -395,13 +458,12 @@ public class PodTest {
         read = channel.read(buffer);
       } while(read >= 0);
       buffer.flip();
-      String data = ByteString.of(buffer).utf8();
-      assertEquals("Hello World", data);
-      assertFalse("Expected no errors on port forward websocket", portForward.errorOccurred());
-      assertEquals("Expected no exceptions on port forward websocket", 0, portForward.getClientThrowables().size());
-      assertEquals("Expected no exceptions on port forward websocket", 0, portForward.getServerThrowables().size());
+      channel.socket().close();
+      assertEquals("Hello World", ByteString.of(buffer).utf8());
+      assertFalse(portForward.errorOccurred());
+      assertEquals(0, portForward.getClientThrowables().size());
+      assertEquals(0, portForward.getServerThrowables().size());
     }
-
   }
 
   @Test
@@ -417,8 +479,6 @@ public class PodTest {
       .done()
       .once();
 
-    KubernetesClient client = server.getClient();
-
     ByteArrayInputStream in = new ByteArrayInputStream(new byte[0]);
     ReadableByteChannel inChannel = Channels.newChannel(in);
 
@@ -431,21 +491,29 @@ public class PodTest {
       }
     }
 
-    String got = new String(out.toByteArray(), "UTF-8");
+    String got = new String(out.toByteArray(), StandardCharsets.UTF_8);
     assertEquals("Hello World!", got);
   }
 
-
-  @Test(expected = KubernetesClientException.class)
-  public void testOptionalCopy() {
-    KubernetesClient client = server.getClient();
-    client.pods().inNamespace("ns1").withName("pod2").file("/etc/hosts").copy(Files.temporaryFolder().toPath());
+  @Test
+  public void testOptionalUpload() {
+    Assertions.assertThrows(KubernetesClientException.class, () -> {
+      client.pods().inNamespace("ns1").withName("pod2").dir("/etc/hosts/dir").upload(temporaryFolder.newFolder().toPath());
+    });
   }
 
-  @Test(expected = KubernetesClientException.class)
+  @Test
+  public void testOptionalCopy() {
+    Assertions.assertThrows(KubernetesClientException.class, () -> {
+      client.pods().inNamespace("ns1").withName("pod2").file("/etc/hosts").copy(temporaryFolder.newFolder().toPath());
+    });
+  }
+
+  @Test
   public void testOptionalCopyDir() {
-    KubernetesClient client = server.getClient();
-    client.pods().inNamespace("ns1").withName("pod2").dir("/etc/hosts").copy(Files.temporaryFolder().toPath());
+    Assertions.assertThrows(KubernetesClientException.class, () -> {
+      client.pods().inNamespace("ns1").withName("pod2").dir("/etc/hosts").copy(temporaryFolder.newFolder().toPath());
+    });
   }
   @Test
   public void testListFromServer() {
@@ -472,8 +540,6 @@ public class PodTest {
       .withPath("/api/v1/namespaces/test/pods/pod1")
       .andReturn(200, serverPod).once();
 
-    KubernetesClient client = server.getClient();
-
     List<HasMetadata> resources = client.resourceList(clientPod).fromServer().get();
 
     assertNotNull(resources);
@@ -493,11 +559,11 @@ public class PodTest {
 
   private static String portForwardEncode(boolean dataChannel, String str) {
     try {
-      byte[] data = str.getBytes("UTF-8");
+      byte[] data = str.getBytes(StandardCharsets.UTF_8);
       byte[] msg = new byte[data.length + 1];
       System.arraycopy(data, 0, msg, 1, data.length);
       msg[0] = dataChannel ? (byte) 0 : (byte) 1;
-      return new String(msg, "UTF-8");
+      return new String(msg, StandardCharsets.UTF_8);
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }

@@ -16,6 +16,8 @@
 
 package io.fabric8.openshift.client.server.mock;
 
+import io.fabric8.kubernetes.api.model.HasMetadata;
+import io.fabric8.kubernetes.api.model.rbac.RoleBindingBuilder;
 import io.fabric8.openshift.api.model.Project;
 import io.fabric8.openshift.api.model.ProjectBuilder;
 import io.fabric8.openshift.api.model.ProjectList;
@@ -23,21 +25,26 @@ import io.fabric8.openshift.api.model.ProjectListBuilder;
 import io.fabric8.openshift.client.OpenShiftClient;
 
 import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.migrationsupport.rules.EnableRuleMigrationSupport;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import java.net.HttpURLConnection;
+import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+@EnableRuleMigrationSupport
 public class ProjectTest {
   @Rule
   public OpenShiftServer server = new OpenShiftServer();
 
   @Test
   public void testList() {
-   server.expect().withPath("/oapi/v1/projects").andReturn(200, new ProjectListBuilder()
+   server.expect().withPath("/apis/project.openshift.io/v1/projects").andReturn(200, new ProjectListBuilder()
       .addNewItem().and()
       .addNewItem().and().build()).once();
 
@@ -52,11 +59,11 @@ public class ProjectTest {
 
   @Test
   public void testGet() {
-   server.expect().withPath("/oapi/v1/projects/project1").andReturn(200, new ProjectBuilder()
+   server.expect().withPath("/apis/project.openshift.io/v1/projects/project1").andReturn(200, new ProjectBuilder()
       .withNewMetadata().withName("project1").endMetadata()
       .build()).once();
 
-   server.expect().withPath("/oapi/v1/projects/project2").andReturn(200, new ProjectBuilder()
+   server.expect().withPath("/apis/project.openshift.io/v1/projects/project2").andReturn(200, new ProjectBuilder()
       .withNewMetadata().withName("project2").endMetadata()
       .build()).once();
 
@@ -77,8 +84,8 @@ public class ProjectTest {
 
   @Test
   public void testDelete() {
-   server.expect().withPath("/oapi/v1/projects/project1").andReturn(200, new ProjectBuilder().build()).once();
-   server.expect().withPath("/oapi/v1/projects/project2").andReturn( 200, new ProjectBuilder().build()).once();
+   server.expect().withPath("/apis/project.openshift.io/v1/projects/project1").andReturn(200, new ProjectBuilder().build()).once();
+   server.expect().withPath("/apis/project.openshift.io/v1/projects/project2").andReturn( 200, new ProjectBuilder().build()).once();
 
     OpenShiftClient client = server.getOpenshiftClient();
 
@@ -90,5 +97,108 @@ public class ProjectTest {
 
     deleted = client.projects().withName("project3").delete();
     assertFalse(deleted);
+  }
+
+  @Test
+  void testCreateProjectAndRoleBindings() {
+    // Given
+    String name = "test-project";
+    String displayName = "test-project";
+    String description = "test project";
+    String requestingUser = "request-user";
+    String adminUser = "admin-user";
+    server.expect().post().withPath("/apis/project.openshift.io/v1/projects")
+      .andReturn(HttpURLConnection.HTTP_CREATED, new ProjectBuilder()
+        .withNewMetadata()
+        .addToAnnotations("openshift.io/description", description)
+        .addToAnnotations("openshift.io/display-name", displayName)
+        .addToAnnotations("openshift.io/requester", requestingUser)
+        .withName("test-project")
+        .endMetadata()
+        .build()).once();
+    server.expect().post().withPath("/apis/rbac.authorization.k8s.io/v1/namespaces/test-project/rolebindings")
+      .andReturn(HttpURLConnection.HTTP_CREATED, new RoleBindingBuilder()
+        .withNewMetadata()
+        .addToAnnotations("openshift.io/description", "Allows all pods in this namespace to pull images from this namespace.  It is auto-managed by a controller; remove subjects to disable.")
+        .withName("system:image-pullers")
+        .withNamespace(name)
+        .endMetadata()
+        .withNewRoleRef()
+        .withApiGroup("rbac.authorization.k8s.io")
+        .withKind("ClusterRole")
+        .withName("system:image-puller")
+        .endRoleRef()
+        .addNewSubject()
+        .withApiGroup("rbac.authorization.k8s.io")
+        .withKind("Group")
+        .withName("system:serviceaccounts:" + name)
+        .endSubject()
+        .build()).once();
+    server.expect().post().withPath("/apis/rbac.authorization.k8s.io/v1/namespaces/test-project/rolebindings")
+      .andReturn(HttpURLConnection.HTTP_CREATED, new RoleBindingBuilder()
+        .withNewMetadata()
+        .addToAnnotations("openshift.io/description", "Allows builds in this namespace to push images to" +
+          "this namespace.  It is auto-managed by a controller; remove subjects to disable.")
+        .withName("system:image-builders")
+        .withNamespace(name)
+        .endMetadata()
+        .withNewRoleRef()
+        .withApiGroup("rbac.authorization.k8s.io")
+        .withKind("ClusterRole")
+        .withName("system:image-builder")
+        .endRoleRef()
+        .addNewSubject()
+        .withKind("ServiceAccount")
+        .withName("builder")
+        .withNamespace(name)
+        .endSubject()
+        .build()).once();
+    server.expect().post().withPath("/apis/rbac.authorization.k8s.io/v1/namespaces/test-project/rolebindings")
+      .andReturn(HttpURLConnection.HTTP_CREATED, new RoleBindingBuilder()
+        .withNewMetadata()
+        .addToAnnotations("openshift.io/description", " Allows deploymentconfigs in this namespace to rollout" +
+          " pods in this namespace.  It is auto-managed by a controller; remove subjects" +
+          " to disable.")
+        .withName("system:deployers")
+        .withNamespace(name)
+        .endMetadata()
+        .withNewRoleRef()
+        .withApiGroup("rbac.authorization.k8s.io")
+        .withKind("ClusterRole")
+        .withName("system:deployer")
+        .endRoleRef()
+        .addNewSubject()
+        .withKind("ServiceAccount")
+        .withName("deployer")
+        .withNamespace(name)
+        .endSubject()
+        .build()).once();
+    server.expect().post().withPath("/apis/rbac.authorization.k8s.io/v1/namespaces/test-project/rolebindings")
+      .andReturn(HttpURLConnection.HTTP_CREATED, new RoleBindingBuilder()
+        .withNewMetadata()
+        .withName("admin")
+        .withNamespace(name)
+        .endMetadata()
+        .withNewRoleRef()
+        .withApiGroup("rbac.authorization.k8s.io")
+        .withKind("ClusterRole")
+        .withName("admin")
+        .endRoleRef()
+        .addNewSubject()
+        .withApiGroup("rbac.authorization.k8s.io")
+        .withKind("User")
+        .withName(adminUser)
+        .endSubject()
+        .build()).once();
+
+
+    OpenShiftClient client = server.getOpenshiftClient();
+
+    // When
+    List<HasMetadata> result = client.projects().createProjectAndRoleBindings(name, description, displayName, adminUser, requestingUser);
+
+    // Then
+    assertNotNull(result);
+    assertEquals(5, result.size());
   }
 }

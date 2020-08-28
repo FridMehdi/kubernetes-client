@@ -17,6 +17,13 @@ package io.fabric8.kubernetes.client.internal;
 
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.utils.Utils;
+import okio.ByteString;
+import org.bouncycastle.openssl.PEMKeyPair;
+import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -39,14 +46,9 @@ import java.security.cert.X509Certificate;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.RSAPrivateCrtKeySpec;
+import java.util.Collection;
 import java.util.concurrent.Callable;
-
-import okio.ByteString;
-import org.bouncycastle.openssl.PEMKeyPair;
-import org.bouncycastle.openssl.PEMParser;
-import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.stream.Collectors;
 
 public class CertUtils {
 
@@ -99,8 +101,7 @@ public class CertUtils {
     while (pemInputStream.available() > 0) {
       CertificateFactory certFactory = CertificateFactory.getInstance("X509");
       X509Certificate cert = (X509Certificate) certFactory.generateCertificate(pemInputStream);
-
-      String alias = cert.getSubjectX500Principal().getName();
+      String alias = cert.getSubjectX500Principal().getName() + "_" + cert.getSerialNumber().toString(16);
       trustStore.setCertificateEntry(alias, cert);
     }
     return trustStore;
@@ -108,7 +109,7 @@ public class CertUtils {
 
   public static KeyStore createKeyStore(InputStream certInputStream, InputStream keyInputStream, String clientKeyAlgo, char[] clientKeyPassphrase, String keyStoreFile, char[] keyStorePassphrase) throws IOException, CertificateException, NoSuchAlgorithmException, InvalidKeySpecException, KeyStoreException {
       CertificateFactory certFactory = CertificateFactory.getInstance("X509");
-      X509Certificate cert = (X509Certificate) certFactory.generateCertificate(certInputStream);
+      Collection<? extends Certificate> certificates = certFactory.generateCertificates(certInputStream);
       PrivateKey privateKey = loadKey(keyInputStream, clientKeyAlgo);
 
       KeyStore keyStore = KeyStore.getInstance("JKS");
@@ -118,8 +119,8 @@ public class CertUtils {
         loadDefaultKeyStoreFile(keyStore, keyStorePassphrase);
       }
 
-      String alias = cert.getSubjectX500Principal().getName();
-      keyStore.setKeyEntry(alias, privateKey, clientKeyPassphrase, new Certificate[]{cert});
+      String alias = certificates.stream().map(cert->((X509Certificate)cert).getIssuerX500Principal().getName()).collect(Collectors.joining("_"));
+      keyStore.setKeyEntry(alias, privateKey, clientKeyPassphrase, certificates.toArray(new Certificate[0]));
 
       return keyStore;
   }
@@ -144,7 +145,9 @@ public class CertUtils {
         @Override
         public PrivateKey call() {
           try {
-            Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
+            if (Security.getProvider("BC") == null) {
+              Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
+            }
             PEMKeyPair keys = (PEMKeyPair) new PEMParser(new InputStreamReader(keyInputStream)).readObject();
             return new
               JcaPEMKeyConverter().

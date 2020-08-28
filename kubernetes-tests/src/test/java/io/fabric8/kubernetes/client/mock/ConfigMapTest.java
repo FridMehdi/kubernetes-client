@@ -25,11 +25,13 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesServer;
 import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.migrationsupport.rules.EnableRuleMigrationSupport;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+@EnableRuleMigrationSupport
 public class ConfigMapTest {
 
   @Rule
@@ -53,7 +55,7 @@ public class ConfigMapTest {
     NamespacedKubernetesClient client = server.getClient();
     ConfigMapList cfgList = client.configMaps().list();
     assertNotNull(cfgList);
-    assertEquals(2, cfgList.getAdditionalProperties().size());
+    assertEquals(1, cfgList.getAdditionalProperties().size());
     Map<String, String> keys = (Map<String, String>) cfgList.getAdditionalProperties().get("data");
     assertEquals("gouda",keys.get("cheese"));
     assertEquals("bar",keys.get("foo"));

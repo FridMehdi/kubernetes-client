@@ -16,6 +16,8 @@
 
 package io.fabric8.openshift.client.server.mock;
 
+import io.fabric8.kubernetes.api.model.APIGroupListBuilder;
+import io.fabric8.kubernetes.api.model.DeletionPropagation;
 import io.fabric8.openshift.api.model.Group;
 import io.fabric8.openshift.api.model.GroupBuilder;
 import io.fabric8.openshift.api.model.GroupList;
@@ -24,23 +26,36 @@ import io.fabric8.openshift.client.NamespacedOpenShiftClient;
 import io.fabric8.openshift.client.OpenShiftClient;
 
 import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.migrationsupport.rules.EnableRuleMigrationSupport;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@EnableRuleMigrationSupport
 public class GroupTest {
   @Rule
   public OpenShiftServer server = new OpenShiftServer();
 
   @Test
   public void testList() {
-   server.expect().withPath("/oapi/v1/groups").andReturn(200, new GroupListBuilder()
+   server.expect().withPath("/apis/user.openshift.io/v1/groups").andReturn(200, new GroupListBuilder()
       .addNewItem().and()
       .addNewItem().and().build()).always();
+
+   server.expect().withPath("/apis").andReturn(200, new APIGroupListBuilder()
+      .addNewGroup()
+      .withApiVersion("v1")
+      .withName("autoscaling.k8s.io")
+      .endGroup()
+      .addNewGroup()
+      .withApiVersion("v1")
+      .withName("security.openshift.io")
+      .endGroup()
+      .build()).always();
 
 
     NamespacedOpenShiftClient client = server.getOpenshiftClient();
@@ -58,11 +73,11 @@ public class GroupTest {
 
   @Test
   public void testGet() {
-   server.expect().withPath("/oapi/v1/groups/group1").andReturn(200, new GroupBuilder()
+   server.expect().withPath("/apis/user.openshift.io/v1/groups/group1").andReturn(200, new GroupBuilder()
       .withNewMetadata().withName("group1").endMetadata()
       .build()).once();
 
-   server.expect().withPath("/oapi/v1/groups/Group2").andReturn(200, new GroupBuilder()
+   server.expect().withPath("/apis/user.openshift.io/v1/groups/Group2").andReturn(200, new GroupBuilder()
       .withNewMetadata().withName("Group2").endMetadata()
       .build()).once();
 
@@ -83,8 +98,8 @@ public class GroupTest {
 
   @Test
   public void testDelete() {
-   server.expect().withPath("/oapi/v1/groups/group1").andReturn(200, new GroupBuilder().build()).once();
-   server.expect().withPath("/oapi/v1/groups/Group2").andReturn( 200, new GroupBuilder().build()).once();
+   server.expect().withPath("/apis/user.openshift.io/v1/groups/group1").andReturn(200, new GroupBuilder().build()).once();
+   server.expect().withPath("/apis/user.openshift.io/v1/groups/Group2").andReturn( 200, new GroupBuilder().build()).once();
 
     OpenShiftClient client = server.getOpenshiftClient();
 
@@ -95,6 +110,23 @@ public class GroupTest {
     assertTrue(deleted);
 
     deleted = client.groups().withName("Group3").delete();
+    assertFalse(deleted);
+  }
+
+  @Test
+  public void testDeleteWithPropagationPolicy() {
+    server.expect().withPath("/apis/user.openshift.io/v1/groups/group1").andReturn(200, new GroupBuilder().build()).once();
+    server.expect().withPath("/apis/user.openshift.io/v1/groups/Group2").andReturn( 200, new GroupBuilder().build()).once();
+
+    OpenShiftClient client = server.getOpenshiftClient();
+
+    Boolean deleted = client.groups().withName("group1").withPropagationPolicy(DeletionPropagation.FOREGROUND).delete();
+    assertNotNull(deleted);
+
+    deleted = client.groups().withName("Group2").withPropagationPolicy(DeletionPropagation.FOREGROUND).delete();
+    assertTrue(deleted);
+
+    deleted = client.groups().withName("Group3").withPropagationPolicy(DeletionPropagation.FOREGROUND).delete();
     assertFalse(deleted);
   }
 }
